@@ -40,6 +40,8 @@ import android.widget.PopupMenu;
 import android.content.Intent;
 import androidx.core.content.FileProvider;
 import java.text.ParseException;
+import android.widget.Button;
+import android.widget.FrameLayout;
 
 public class SectionFragment extends Fragment {
     private static final String ARG_TYPE = "type";
@@ -91,6 +93,8 @@ public class SectionFragment extends Fragment {
     private String lastOpenedImage = null;
     private String lastOpenedImageTime = null;
     private android.app.Dialog currentImageDialog = null;
+    private Button permissionButton;
+    private FrameLayout rootLayout;
 
     public static SectionFragment newInstance(String type, String filter) {
         SectionFragment fragment = new SectionFragment();
@@ -111,6 +115,9 @@ public class SectionFragment extends Fragment {
         emptyStateText = view.findViewById(R.id.emptyStateText);
         refreshButton = view.findViewById(R.id.refreshButton);
         sortButton = view.findViewById(R.id.sortButton);
+        if (view instanceof FrameLayout) {
+            rootLayout = (FrameLayout) view;
+        }
         if (getArguments() != null) {
             type = getArguments().getString(ARG_TYPE, "others");
             filter = getArguments().getString(ARG_FILTER, "");
@@ -586,5 +593,93 @@ public class SectionFragment extends Fragment {
         imageView.animate().alpha(1f).setDuration(400).start();
         imageView.setOnClickListener(v -> currentImageDialog.dismiss());
         currentImageDialog.show();
+    }
+
+    private boolean hasStoragePermission() {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            // Android 11+ (API 30+)
+            return android.os.Environment.isExternalStorageManager();
+        } else {
+            // Android 10 and below
+            return androidx.core.content.ContextCompat.checkSelfPermission(requireContext(), android.Manifest.permission.READ_EXTERNAL_STORAGE) == android.content.pm.PackageManager.PERMISSION_GRANTED &&
+                    androidx.core.content.ContextCompat.checkSelfPermission(requireContext(), android.Manifest.permission.WRITE_EXTERNAL_STORAGE) == android.content.pm.PackageManager.PERMISSION_GRANTED;
+        }
+    }
+
+    private void showPermissionButton() {
+        if (permissionButton == null) {
+            permissionButton = new Button(getContext());
+            permissionButton.setText("Allow Storage Permission");
+            permissionButton.setOnClickListener(v -> requestStoragePermission());
+            FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT
+            );
+            params.gravity = android.view.Gravity.CENTER;
+            if (rootLayout != null) {
+                rootLayout.addView(permissionButton, params);
+            }
+        }
+        if (getView() != null) {
+            View recyclerView = getView().findViewById(R.id.sectionRecyclerView);
+            View progressBar = getView().findViewById(R.id.progressBar);
+            if (recyclerView != null) recyclerView.setVisibility(View.GONE);
+            if (progressBar != null) progressBar.setVisibility(View.GONE);
+        }
+        permissionButton.setVisibility(View.VISIBLE);
+    }
+
+    private void requestStoragePermission() {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            requestAllFilesAccess();
+        } else {
+            requestLegacyStoragePermissions();
+        }
+    }
+
+    private void requestAllFilesAccess() {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            try {
+                new android.app.AlertDialog.Builder(getContext())
+                        .setTitle("Storage Permission Required")
+                        .setMessage("This app needs access to manage all files on your device to function properly. Please grant 'All files access' permission in the next screen.")
+                        .setPositiveButton("Continue", (dialog, which) -> {
+                            android.content.Intent intent = new android.content.Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
+                            intent.setData(android.net.Uri.parse("package:" + requireContext().getPackageName()));
+                            startActivityForResult(intent, 124);
+                        })
+                        .setNegativeButton("Cancel", (dialog, which) -> {
+                            Toast.makeText(getContext(), "Storage permission is required for app functionality", Toast.LENGTH_LONG).show();
+                        })
+                        .show();
+            } catch (Exception e) {
+                android.content.Intent intent = new android.content.Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
+                startActivityForResult(intent, 124);
+            }
+        }
+    }
+
+    private void requestLegacyStoragePermissions() {
+        if (shouldShowRequestPermissionRationale(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) ||
+                shouldShowRequestPermissionRationale(android.Manifest.permission.READ_EXTERNAL_STORAGE)) {
+            new android.app.AlertDialog.Builder(getContext())
+                    .setTitle("Storage Permission Required")
+                    .setMessage("This app needs storage permission to read and write files on your device.")
+                    .setPositiveButton("Grant Permission", (dialog, which) -> {
+                        requestPermissions(new String[]{
+                                android.Manifest.permission.READ_EXTERNAL_STORAGE,
+                                android.Manifest.permission.WRITE_EXTERNAL_STORAGE
+                        }, 123);
+                    })
+                    .setNegativeButton("Cancel", (dialog, which) -> {
+                        Toast.makeText(getContext(), "Storage permission is required for app functionality", Toast.LENGTH_LONG).show();
+                    })
+                    .show();
+        } else {
+            requestPermissions(new String[]{
+                    android.Manifest.permission.READ_EXTERNAL_STORAGE,
+                    android.Manifest.permission.WRITE_EXTERNAL_STORAGE
+            }, 123);
+        }
     }
 } 
