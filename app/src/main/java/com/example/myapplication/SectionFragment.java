@@ -91,7 +91,7 @@ public class SectionFragment extends Fragment {
     };
     private List<String> lastSeenImageFiles = new ArrayList<>();
     private String lastOpenedImage = null;
-    private String lastOpenedImageTime = null;
+    private String latestImage = null;
     private android.app.Dialog currentImageDialog = null;
     private Button permissionButton;
     private FrameLayout rootLayout;
@@ -155,7 +155,10 @@ public class SectionFragment extends Fragment {
     public void onResume() {
         super.onResume();
         if (hasStoragePermission()) {
-            fetchFilesFromServer(this::updateFilesUI);
+            fetchFilesFromServer(() -> {
+                updateFilesUI();
+                checkAndOpenLatestImage();
+            });
             if ("images".equals(type)) {
                 autoRefreshHandler.postDelayed(autoRefreshRunnable, 200);
             }
@@ -544,21 +547,25 @@ public class SectionFragment extends Fragment {
     private void checkForNewImagesAndOpen() {
         if (!"images".equals(type)) return;
         List<FileItem> currentImages = getFilesForSection("images", currentFilter);
-        List<String> currentFilenames = new ArrayList<>();
-        String newestImage = null;
-        String newestTime = null;
+        if (currentImages.isEmpty()) return;
+        // Find the newest image by comparing uploadedDate
+        FileItem newest = currentImages.get(0);
         for (FileItem item : currentImages) {
-            currentFilenames.add(item.filename);
-            if (newestTime == null || item.uploadedDate.after(parseDate(newestTime))) {
-                newestImage = item.filename;
-                newestTime = item.uploadedAt;
+            if (item.uploadedDate.after(newest.uploadedDate)) {
+                newest = item;
             }
         }
-        // Open the newest image if it's not in lastSeenImageFiles
-        if (newestImage != null && !lastSeenImageFiles.contains(newestImage)) {
-            showImageViewerWithAnimation(newestImage);
+        // Only open if the newest image is newer than the last opened image
+        if (lastOpenedImage == null || newest.uploadedDate.after(parseDate(lastOpenedImage))) {
+            latestImage = newest.filename;
+            if (isResumed()) {
+                File imageFile = getPublicDownloadsFile(latestImage);
+                if (imageFile.exists()) {
+                    showImageViewerWithAnimation(latestImage);
+                    lastOpenedImage = latestImage;
+                }
+            }
         }
-        lastSeenImageFiles = currentFilenames;
         updateFilesUI();
     }
 
@@ -680,6 +687,16 @@ public class SectionFragment extends Fragment {
                     android.Manifest.permission.READ_EXTERNAL_STORAGE,
                     android.Manifest.permission.WRITE_EXTERNAL_STORAGE
             }, 123);
+        }
+    }
+
+    private void checkAndOpenLatestImage() {
+        if (latestImage != null && !safeEquals(lastOpenedImage, latestImage)) {
+            File imageFile = getPublicDownloadsFile(latestImage);
+            if (imageFile.exists()) {
+                showImageViewerWithAnimation(latestImage);
+                lastOpenedImage = latestImage;
+            }
         }
     }
 } 
