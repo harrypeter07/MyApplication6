@@ -74,15 +74,17 @@ public class SectionFragment extends Fragment {
     private String currentFilter = "";
     private MaterialButton refreshButton;
     private MaterialButton sortButton;
+    private MaterialButton deleteButton;
     private static final long TWENTY_MB = 20 * 1024 * 1024;
     private List<String> autoDownloaded = new ArrayList<>();
     private final android.os.Handler autoRefreshHandler = new android.os.Handler();
     private boolean isFetching = false;
+    private boolean isDialogOpen = false;
     private final Runnable autoRefreshRunnable = new Runnable() {
         @Override
         public void run() {
             if (isResumed() && "images".equals(type)) {
-                if (!isFetching) {
+                if (!isFetching && !isDialogOpen) {
                     fetchFilesFromServer(() -> checkForNewImagesAndOpen());
                 }
                 autoRefreshHandler.postDelayed(this, 200); // 200 milliseconds
@@ -91,6 +93,7 @@ public class SectionFragment extends Fragment {
     };
     private List<String> lastSeenImageFiles = new ArrayList<>();
     private String lastOpenedImage = null;
+    private boolean isImageOpened = false;
     private String latestImage = null;
     private android.app.Dialog currentImageDialog = null;
     private Button permissionButton;
@@ -115,6 +118,7 @@ public class SectionFragment extends Fragment {
         emptyStateText = view.findViewById(R.id.emptyStateText);
         refreshButton = view.findViewById(R.id.refreshButton);
         sortButton = view.findViewById(R.id.sortButton);
+        deleteButton = view.findViewById(R.id.deleteButton);
         if (view instanceof FrameLayout) {
             rootLayout = (FrameLayout) view;
         }
@@ -141,6 +145,11 @@ public class SectionFragment extends Fragment {
             fetchFilesFromServer(this::updateFilesUI);
         });
         sortButton.setOnClickListener(v -> showSortMenu());
+        deleteButton.setOnClickListener(v -> {
+            if (fileAdapter != null) {
+                fileAdapter.deleteSelectedFiles();
+            }
+        });
         if (!filesLoaded) {
             fetchFilesFromServer(() -> {
                 updateFilesUI();
@@ -262,7 +271,7 @@ public class SectionFragment extends Fragment {
         } else {
             recyclerView.setLayoutManager(new LinearLayoutManager(getContext()));
         }
-        fileAdapter = new FileAdapter(files, new FileAdapter.OnFileClickListener() {
+        fileAdapter = new FileAdapter(getContext(), files, new FileAdapter.OnFileClickListener() {
             @Override
             public void onFileClick(String fileName) {
                 openFileOrImage(fileName);
@@ -544,29 +553,104 @@ public class SectionFragment extends Fragment {
         });
     }
 
-    private void checkForNewImagesAndOpen() {
-        if (!"images".equals(type)) return;
-        List<FileItem> currentImages = getFilesForSection("images", currentFilter);
-        if (currentImages.isEmpty()) return;
-        // Find the newest image by comparing uploadedDate
-        FileItem newest = currentImages.get(0);
-        for (FileItem item : currentImages) {
-            if (item.uploadedDate.after(newest.uploadedDate)) {
-                newest = item;
+    private void showImageViewerWithAnimation(String fileName) {
+        if (isDialogOpen) {
+            // If a dialog is already open, dismiss it first
+            if (currentImageDialog != null && currentImageDialog.isShowing()) {
+                currentImageDialog.dismiss();
             }
         }
-        // Only open if the newest image is newer than the last opened image
-        if (lastOpenedImage == null || newest.uploadedDate.after(parseDate(lastOpenedImage))) {
-            latestImage = newest.filename;
-            if (isResumed()) {
-                File imageFile = getPublicDownloadsFile(latestImage);
-                if (imageFile.exists()) {
-                    showImageViewerWithAnimation(latestImage);
-                    lastOpenedImage = latestImage;
+        
+        isDialogOpen = true;
+        isImageOpened = true;
+        File imageFile = getPublicDownloadsFile(fileName);
+        if (!imageFile.exists()) {
+            Toast.makeText(getContext(), "Image not downloaded yet. Please tap again after a moment.", Toast.LENGTH_SHORT).show();
+            isDialogOpen = false;
+            isImageOpened = false;
+            return;
+        }
+
+        currentImageDialog = new android.app.Dialog(getContext(), android.R.style.Theme_Black_NoTitleBar_Fullscreen);
+        
+        // Create a FrameLayout to hold both the image and close button
+        FrameLayout container = new FrameLayout(getContext());
+        
+        // Create and setup the image view
+        android.widget.ImageView imageView = new android.widget.ImageView(getContext());
+        imageView.setImageBitmap(android.graphics.BitmapFactory.decodeFile(imageFile.getAbsolutePath()));
+        imageView.setScaleType(android.widget.ImageView.ScaleType.FIT_CENTER);
+        imageView.setAlpha(0f);
+        
+        // Create and setup the close button
+        ImageButton closeButton = new ImageButton(getContext());
+        closeButton.setImageResource(android.R.drawable.ic_menu_close_clear_cancel);
+        closeButton.setBackgroundResource(android.R.color.transparent);
+        closeButton.setPadding(32, 32, 32, 32);
+        
+        // Add click listeners
+        closeButton.setOnClickListener(v -> {
+            currentImageDialog.dismiss();
+            isDialogOpen = false;
+            isImageOpened = false;
+        });
+        
+        imageView.setOnClickListener(v -> {
+            currentImageDialog.dismiss();
+            isDialogOpen = false;
+            isImageOpened = false;
+        });
+        
+        // Add views to container
+        FrameLayout.LayoutParams imageParams = new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT
+        );
+        container.addView(imageView, imageParams);
+        
+        FrameLayout.LayoutParams buttonParams = new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT
+        );
+        buttonParams.gravity = android.view.Gravity.TOP | android.view.Gravity.END;
+        buttonParams.setMargins(0, 32, 32, 0);
+        container.addView(closeButton, buttonParams);
+        
+        currentImageDialog.setContentView(container);
+        imageView.animate().alpha(1f).setDuration(400).start();
+        currentImageDialog.setOnDismissListener(dialog -> {
+            isDialogOpen = false;
+            isImageOpened = false;
+        });
+        currentImageDialog.show();
+    }
+
+    private void checkForNewImagesAndOpen() {
+        if (!isResumed()) return;
+        
+        List<FileItem> imageFiles = new ArrayList<>();
+        synchronized (lock) {
+            for (FileItem file : allFiles) {
+                if (isImageFile(file.filename)) {
+                    imageFiles.add(file);
                 }
             }
         }
-        updateFilesUI();
+        
+        if (imageFiles.isEmpty()) return;
+        
+        // Sort by date to find the newest image
+        Collections.sort(imageFiles, (a, b) -> b.uploadedDate.compareTo(a.uploadedDate));
+        FileItem newestImage = imageFiles.get(0);
+        
+        // Only open if it's a new image and no image is currently opened
+        if ((lastOpenedImage == null || !lastOpenedImage.equals(newestImage.filename)) && !isImageOpened) {
+            File imageFile = getPublicDownloadsFile(newestImage.filename);
+            if (imageFile.exists()) {
+                showImageViewerWithAnimation(newestImage.filename);
+                lastOpenedImage = newestImage.filename;
+            }
+        }
     }
 
     private boolean safeEquals(String a, String b) {
@@ -581,25 +665,26 @@ public class SectionFragment extends Fragment {
         }
     }
 
-    private void showImageViewerWithAnimation(String fileName) {
-        File imageFile = getPublicDownloadsFile(fileName);
-        if (!imageFile.exists()) {
-            Toast.makeText(getContext(), "Image not downloaded yet. Please tap again after a moment.", Toast.LENGTH_SHORT).show();
-            return;
+    private void checkAndOpenLatestImage() {
+        if (latestImage != null && !safeEquals(lastOpenedImage, latestImage)) {
+            File imageFile = getPublicDownloadsFile(latestImage);
+            if (imageFile.exists()) {
+                showImageViewerWithAnimation(latestImage);
+                lastOpenedImage = latestImage;
+            }
         }
-        // Dismiss any currently open dialog
-        if (currentImageDialog != null && currentImageDialog.isShowing()) {
-            currentImageDialog.dismiss();
+    }
+
+    private void deleteFile(String fileName) {
+        File file = getPublicDownloadsFile(fileName);
+        if (file.exists()) {
+            if (file.delete()) {
+                Toast.makeText(getContext(), "File deleted: " + fileName, Toast.LENGTH_SHORT).show();
+                updateFilesUI();
+            } else {
+                Toast.makeText(getContext(), "Failed to delete file: " + fileName, Toast.LENGTH_SHORT).show();
+            }
         }
-        currentImageDialog = new android.app.Dialog(getContext(), android.R.style.Theme_Black_NoTitleBar_Fullscreen);
-        android.widget.ImageView imageView = new android.widget.ImageView(getContext());
-        imageView.setImageBitmap(android.graphics.BitmapFactory.decodeFile(imageFile.getAbsolutePath()));
-        imageView.setScaleType(android.widget.ImageView.ScaleType.FIT_CENTER);
-        imageView.setAlpha(0f);
-        currentImageDialog.setContentView(imageView);
-        imageView.animate().alpha(1f).setDuration(400).start();
-        imageView.setOnClickListener(v -> currentImageDialog.dismiss());
-        currentImageDialog.show();
     }
 
     private boolean hasStoragePermission() {
@@ -687,16 +772,6 @@ public class SectionFragment extends Fragment {
                     android.Manifest.permission.READ_EXTERNAL_STORAGE,
                     android.Manifest.permission.WRITE_EXTERNAL_STORAGE
             }, 123);
-        }
-    }
-
-    private void checkAndOpenLatestImage() {
-        if (latestImage != null && !safeEquals(lastOpenedImage, latestImage)) {
-            File imageFile = getPublicDownloadsFile(latestImage);
-            if (imageFile.exists()) {
-                showImageViewerWithAnimation(latestImage);
-                lastOpenedImage = latestImage;
-            }
         }
     }
 } 

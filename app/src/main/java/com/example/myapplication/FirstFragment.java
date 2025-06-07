@@ -74,7 +74,7 @@ public class FirstFragment extends Fragment implements FileAdapter.OnFileClickLi
         rootLayout = (FrameLayout) view;
         refreshFab = view.findViewById(R.id.fab_refresh);
         recyclerView.setLayoutManager(new LinearLayoutManager(getContext()));
-        fileAdapter = new FileAdapter(new ArrayList<>(), this, this);
+        fileAdapter = new FileAdapter(getContext(), new ArrayList<>(), this, this);
         recyclerView.setAdapter(fileAdapter);
 
         refreshFab.setOnClickListener(v -> fetchFiles());

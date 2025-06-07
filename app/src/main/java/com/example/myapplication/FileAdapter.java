@@ -14,11 +14,16 @@ import android.graphics.drawable.Drawable;
 import androidx.core.content.ContextCompat;
 import java.io.File;
 import com.google.android.material.button.MaterialButton;
+import android.widget.Toast;
+import java.util.ArrayList;
+import android.content.Context;
 
 public class FileAdapter extends RecyclerView.Adapter<FileAdapter.FileViewHolder> {
     private List<SectionFragment.FileItem> files;
     private final OnFileClickListener listener;
     private final OnDownloadClickListener downloadListener;
+    private List<String> selectedFiles = new ArrayList<>();
+    private Context context;
 
     public interface OnFileClickListener {
         void onFileClick(String fileName);
@@ -29,7 +34,8 @@ public class FileAdapter extends RecyclerView.Adapter<FileAdapter.FileViewHolder
         void onDownloadClick(String fileName);
     }
 
-    public FileAdapter(List<SectionFragment.FileItem> files, OnFileClickListener listener, OnDownloadClickListener downloadListener) {
+    public FileAdapter(Context context, List<SectionFragment.FileItem> files, OnFileClickListener listener, OnDownloadClickListener downloadListener) {
+        this.context = context;
         this.files = files;
         this.listener = listener;
         this.downloadListener = downloadListener;
@@ -126,5 +132,20 @@ public class FileAdapter extends RecyclerView.Adapter<FileAdapter.FileViewHolder
         } else {
             return R.drawable.ic_file;
         }
+    }
+
+    public void deleteSelectedFiles() {
+        for (String fileName : selectedFiles) {
+            File file = getPublicDownloadsFile(fileName);
+            if (file.exists()) {
+                if (file.delete()) {
+                    Toast.makeText(context, "File deleted: " + fileName, Toast.LENGTH_SHORT).show();
+                } else {
+                    Toast.makeText(context, "Failed to delete file: " + fileName, Toast.LENGTH_SHORT).show();
+                }
+            }
+        }
+        selectedFiles.clear();
+        notifyDataSetChanged();
     }
 } 
